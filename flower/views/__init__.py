@@ -8,8 +8,11 @@ from distutils.util import strtobool
 from base64 import b64decode
 
 import tornado
+import tornado.gen
+from tornado import gen
 
 from ..utils import template, bugreport, prepend_url
+from ..utils.broker import get_active_queue_names, get_active_queue_lengths
 
 logger = logging.getLogger(__name__)
 
@@ -122,8 +125,9 @@ class BaseHandler(tornado.web.RequestHandler):
         return task
 
     def get_active_queue_names(self):
-        queues = set([])
-        for _, info in self.application.workers.items():
-            for q in info.get('active_queues', []):
-                queues.add(q['name'])
-        return queues
+        return get_active_queue_names(self.application)
+
+    @tornado.gen.coroutine
+    def get_active_queue_lengths(self):
+        queues = yield get_active_queue_lengths(self.application)
+        raise gen.Return(queues)

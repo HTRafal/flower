@@ -126,7 +126,7 @@ class RedisBase(BrokerBase):
                 'name': name,
                 'messages': sum([self.redis.llen(x) for x in priority_names])
             })
-        raise gen.Return(queue_stats)
+        return queue_stats
 
 
 class Redis(RedisBase):
@@ -254,6 +254,41 @@ class Broker(object):
 
     def queues(self, names):
         raise NotImplementedError
+
+
+def get_active_queue_names(application):
+    queues = set([])
+    for _, info in application.workers.items():
+        for q in info.get('active_queues', []):
+            queues.add(q['name'])
+    return queues
+
+
+@gen.coroutine
+def get_active_queue_lengths(application):
+    app = application
+    capp = application.capp
+    broker_options = capp.conf.BROKER_TRANSPORT_OPTIONS
+
+    http_api = None
+    if app.transport == 'amqp' and app.options.broker_api:
+        http_api = app.options.broker_api
+
+    broker_use_ssl = None
+    if capp.conf.BROKER_USE_SSL:
+        broker_use_ssl = capp.conf.BROKER_USE_SSL
+
+    broker = Broker(app.capp.connection().as_uri(include_password=True),
+                    http_api=http_api, broker_options=broker_options, broker_use_ssl=broker_use_ssl)
+
+    queue_names = get_active_queue_names(application)
+
+    if not queue_names:
+        queue_names = set([capp.conf.CELERY_DEFAULT_QUEUE]) | \
+                      set([q.name for q in capp.conf.CELERY_QUEUES or [] if q.name])
+
+    queues = yield broker.queues(sorted(queue_names))
+    raise gen.Return(queues)
 
 
 @gen.coroutine

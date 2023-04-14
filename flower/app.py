@@ -8,21 +8,24 @@ from concurrent.futures import ThreadPoolExecutor
 
 import celery
 import tornado.web
+import tornado.gen
 
 from tornado import ioloop
 from tornado.concurrent import run_on_executor
 from tornado.httpserver import HTTPServer
+from tornado.ioloop import PeriodicCallback, IOLoop
 from tornado.web import url
 
 from .api import control
 from .urls import handlers as default_handlers
-from .events import Events
+from .events import Events, get_prometheus_metrics
 from .inspector import Inspector
 from .options import default_options
-
+from .utils.broker import get_active_queue_lengths
 
 logger = logging.getLogger(__name__)
-
+# TODO: does BROKER_METRICS_UPDATE_INTERVAL need to be configuration from options?
+BROKER_METRICS_UPDATE_INTERVAL_SECONDS = 10
 
 if sys.version_info[0]==3 and sys.version_info[1] >= 8 and sys.platform.startswith('win'):
     import asyncio
@@ -69,6 +72,7 @@ class Flower(tornado.web.Application):
             max_workers_in_memory=self.options.max_workers,
             max_tasks_in_memory=self.options.max_tasks)
         self.started = False
+        self.io_loop.spawn_callback(self.update_broker_metrics)
 
     def start(self):
         self.events.start()
@@ -106,3 +110,16 @@ class Flower(tornado.web.Application):
 
     def update_workers(self, workername=None):
         return self.inspector.inspect(workername)
+
+    @tornado.gen.coroutine
+    def update_broker_metrics(self):
+        while True:
+            next_call = tornado.gen.sleep(BROKER_METRICS_UPDATE_INTERVAL_SECONDS)
+            try:
+                active_queues = yield get_active_queue_lengths(self)
+                metrics = get_prometheus_metrics()
+                for queue_entry in active_queues:
+                    metrics.queue_length.labels(queue_entry["name"]).set(queue_entry["messages"])
+            except Exception as e:
+                logger.warning("Updating broker metrics failed with %s", repr(e))
+            yield next_call
