@@ -98,8 +98,9 @@ class RedisBase(BrokerBase):
     DEFAULT_SEP = '\x06\x16'
     DEFAULT_PRIORITY_STEPS = [0, 3, 6, 9]
 
-    def __init__(self, broker_url, *args, **kwargs):
+    def __init__(self, broker_url, io_loop=None, *args, **kwargs):
         super(RedisBase, self).__init__(broker_url)
+        self.io_loop = io_loop or ioloop.IOLoop.instance()
         self.redis = None
 
         if not redis:
@@ -118,6 +119,11 @@ class RedisBase(BrokerBase):
 
     @gen.coroutine
     def queues(self, names):
+        # TODO: use redis.asyncio instead of synchronous client with ThreadPoolExecutor
+        queue_sizes = yield self.io_loop.run_in_executor(None, self._queues_synchronous, names)
+        raise gen.Return(queue_sizes)
+
+    def _queues_synchronous(self, names):
         queue_stats = []
         for name in names:
             priority_names = [self.broker_prefix + self._q_for_pri(
