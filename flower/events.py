@@ -60,6 +60,7 @@ class PrometheusMetrics(object):
             "Number of tasks currently executing at a worker",
             ['worker']
         )
+        self.queue_length = Gauge('flower_broker_queue_length', "Broker queue length", ['queue'])
 
 
 class EventsState(State):
